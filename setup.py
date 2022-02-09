@@ -115,5 +115,8 @@ setup(
         "cms.djangoapp": [
             "learnupon_exporter = learnupon_exporter.apps:LearnUponExporterAppConfig",
         ],
+        "lms.djangoapp": [
+            "learnupon_exporter = learnupon_exporter.apps:LearnUponExporterAppConfig",
+        ],
     },
 )

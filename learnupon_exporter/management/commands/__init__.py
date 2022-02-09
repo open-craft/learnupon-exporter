@@ -7,6 +7,7 @@ import os
 import boto3
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from common.djangoapps.student.models import CourseEnrollment
 
 
 def dir_path(string):
@@ -28,7 +29,14 @@ class ExportCommand(BaseCommand): # pylint: disable=abstract-method
             'output_dir',
             type=dir_path,
             default='/edx/src/learnupon-exporter/out',
-            help='Directory to put the LearnUpon output files'
+            help='Directory to put the LearnUpon output files',
+        )
+
+        self.args['course_ids'] = parser.add_argument(
+            'course_ids',
+            type=str,
+            help='List of Course Ids to export',
+            nargs='+'
         )
 
     def __init__(self, *args, **kwargs):
@@ -37,6 +45,8 @@ class ExportCommand(BaseCommand): # pylint: disable=abstract-method
         self.help = __doc__
         self.logger = logging.getLogger()
         self.args = {}
+        self.course_ids = []
+        self.enrollments = CourseEnrollment.objects.none()
 
     def set_logging(self, verbosity):
         """
@@ -78,3 +88,12 @@ class ExportCommand(BaseCommand): # pylint: disable=abstract-method
         file_object.seek(0)
         s3_path_prefix = settings.LEARNUPON_EXPORTER_STATIC_FILES_PATH
         return s3_bucket.put_object(Key=s3_path_prefix + filename, Body=file_object)
+
+    def format_date(self, date):
+        """
+        Returns the date in the CSV format for learnupon with is dd/mm/yyyy
+        """
+
+        if not date:
+            return date
+        return date.strftime('%d/%m/%Y')
