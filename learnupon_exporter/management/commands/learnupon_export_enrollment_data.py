@@ -82,16 +82,21 @@ class Command(ExportCommand):
            - value=the relevant CourseEnrollment instance
         """
 
-        enrollment_ids = {}
         course_mappings = {str(m.edx_course_key): m for m in CourseMapping.objects.all()}
 
         user_ids = self.enrollments.filter(course__in=self.course_ids).values('user_id')
         users = get_user_model().objects.filter(pk__in=user_ids)
-        for user in users:
-            user_enrollment_ids = self.get_enrollment_ids_for_user(user, course_mappings)
-            enrollment_ids.update(user_enrollment_ids)
 
-        return enrollment_ids
+        user_count = users.count()
+        ten_percent = int(user_count / 10)
+
+        self.logger.info("Fetching learndot enrollments for %s users", user_count)
+        
+        for index, user in enumerate(users):
+            if index % ten_percent == 0:
+                self.logger.info('Fetching %s of %s', index + 1, user_count)
+            user_enrollment_ids = self.get_enrollment_ids_for_user(user, course_mappings)
+            yield from user_enrollment_ids.items()
 
     def export_enrollment_data(self, csv_file):
         """
@@ -99,7 +104,7 @@ class Command(ExportCommand):
         """
         field_mapping = {
             "Login ID": "user.email",
-            "Course Name": "course.display_name",
+            "Course Name": "course_id",
             "Enrollment Status": "",
             "Enrollment Completed Date": "",
             "Enrollment Created Date": "",
@@ -113,14 +118,14 @@ class Command(ExportCommand):
         writer.writeheader()
         enrollment_statuses = {es.learndot_enrolment_id: es for es in EnrolmentStatusLog.objects.all()}
 
-        for enrollment, enrollment_id in self.fetch_learndot_enrollments().items():
+        for enrollment, enrollment_id in self.fetch_learndot_enrollments():
             pseudo_context = {"obj": enrollment}
             row = {}
             for csv_field, instance_field in field_mapping.items():
                 if not instance_field:
                     row[csv_field] = ""
                 else:
-                    row[csv_field] = Variable("{{obj.%s}}" % instance_field).resolve(pseudo_context)
+                    row[csv_field] = Variable(f"obj.{instance_field}").resolve(pseudo_context)
 
             row['Enrollment Status'] = 'not started'
             enrollment_status = enrollment_statuses.get(enrollment_id)

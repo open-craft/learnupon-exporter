@@ -18,8 +18,8 @@ pip install -e /edx/src/learnupon-exporter
 ## Usage
 
 ```
-./manage.py cms learnupon_export_users output_dir
-./manage.py cms learnupon_export_enrollment_data ouput_dir
+./manage.py lms learnupon_export_users output_dir course_id [course_id2 course_id3...]
+./manage.py lms learnupon_export_enrollment_data ouput_dir [course_id2 course_id3...]
 ```
 
 In both cases an export file will be created in `output` named based on the current server time.
