@@ -4,6 +4,7 @@ Export the list of users to a CSV file
 from __future__ import absolute_import, print_function, unicode_literals
 
 import csv
+import datetime
 import os
 
 from django.contrib.auth import get_user_model
@@ -12,6 +13,8 @@ from django.utils import timezone
 
 from common.djangoapps.student.models import CourseEnrollment
 from lms.djangoapps.grades.models import PersistentCourseGrade
+
+import pytz
 
 from . import ExportCommand
 
@@ -34,6 +37,18 @@ class Command(ExportCommand):
         self.course_ids = options["course_ids"]
         self.logger.info("Exporting courses: %s", ", ".join(self.course_ids))
         self.enrollments = CourseEnrollment.objects.filter(course__in=self.course_ids)
+
+        start_date = options.get("start_date")
+
+        if start_date:
+            self.enrollments = self.enrollments.filter(created__gte=start_date)
+
+        email_domain = options.get("email_domain")
+        if email_domain:
+            self.enrollments = self.enrollments.filter(
+                user__email__endswith=email_domain
+            )
+
         self.stdout.write("Fetching grades...")
         self.grades = {
             (grade.user_id, grade.course_id): grade
@@ -94,7 +109,7 @@ class Command(ExportCommand):
             first_block_viewed_at = modules.values_list("created", flat=True).first()
 
             if first_block_viewed_at:
-                row["Enrollment Status"] = "started"
+                row["Enrollment Status"] = "completed"
                 row["Enrollment Started Date"] = first_block_viewed_at
 
             if grade:

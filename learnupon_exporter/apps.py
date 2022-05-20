@@ -22,11 +22,9 @@ class LearnUponExporterAppConfig(AppConfig):
         PluginSettings.CONFIG: {
             ProjectType.LMS: {
                 SettingsType.COMMON: {PluginSettings.RELATIVE_PATH: 'settings'},
-                SettingsType.PRODUCTION: {PluginSettings.RELATIVE_PATH: 'settings'},
             },
             ProjectType.CMS: {
                 SettingsType.COMMON: {PluginSettings.RELATIVE_PATH: 'settings'},
-                SettingsType.PRODUCTION: {PluginSettings.RELATIVE_PATH: 'settings'},
             },
         },
     }

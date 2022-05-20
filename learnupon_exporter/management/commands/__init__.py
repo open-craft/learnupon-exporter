@@ -1,12 +1,14 @@
 """
 Base functions for management commands
 """
+import datetime
 import logging
 import os
 
 import boto3
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 from common.djangoapps.student.models import CourseEnrollment
 
 
@@ -23,6 +25,10 @@ class ExportCommand(BaseCommand):  # pylint: disable=abstract-method
     Base command for export classes.
     """
 
+    def clean_date(self, date_string):
+        timestamp = datetime.datetime.strptime(date_string, "%Y-%m-%d")
+        return timezone.make_aware(timestamp)
+
     def add_arguments(self, parser):
         """
         Add named arguments.
@@ -31,11 +37,23 @@ class ExportCommand(BaseCommand):  # pylint: disable=abstract-method
             "output_dir",
             type=dir_path,
             default="/edx/src/learnupon-exporter/out",
-            help="Directory to put the LearnUpon output files",
+            help="Directory to put the LearnUpon output files.",
         )
 
         self.args["course_ids"] = parser.add_argument(
-            "course_ids", type=str, help="List of Course Ids to export", nargs="+"
+            "course_ids", type=str, help="List of Course Ids to export.", nargs="+"
+        )
+
+        self.options["start_date"] = parser.add_argument(
+            "--start-date",
+            type=self.clean_date,
+            help="Start date for enrollments in Y-m-d format.",
+        )
+
+        self.options["email_domain"] = parser.add_argument(
+            "--email-domain",
+            type=str,
+            help="Domain used to filter learners on.",
         )
 
     def __init__(self, *args, **kwargs):
