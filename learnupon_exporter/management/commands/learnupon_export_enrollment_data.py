@@ -29,12 +29,13 @@ class Command(ExportCommand):
         Create the export
         """
         self.set_logging(options["verbosity"])
+        self.course_ids = options["course_ids"]
 
         now = timezone.now()
-        filename = f"enrollment_export{now:%Y%m%d_%H%M%S}.csv"
+        filename = f"enrollment_export{now:%Y%m%d_%H%M%S}_{'_'.join(self.course_ids)}.csv"
         filepath = os.path.join(options["output_dir"], filename)
 
-        self.course_ids = options["course_ids"]
+        
         self.logger.info("Exporting courses: %s", ", ".join(self.course_ids))
         self.enrollments = CourseEnrollment.objects.filter(course__in=self.course_ids)
 
