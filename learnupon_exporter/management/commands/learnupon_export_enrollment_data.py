@@ -113,9 +113,9 @@ class Command(ExportCommand):
                 row["Enrollment Status"] = "completed"
                 row["Enrollment Started Date"] = first_block_viewed_at
 
-            if grade:
+            if grade and grade.passed_timestamp:
                 row["Enrollment Score"] = grade.percent_grade
-                row["Enrollment Completed Date"] = grade.created
+                row["Enrollment Completed Date"] = grade.passed_timestamp
                 row["Enrollment Status"] = "completed"
             writer.writerow(row)
         self.stdout.write("Done!")
