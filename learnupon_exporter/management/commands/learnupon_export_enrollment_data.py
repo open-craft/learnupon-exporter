@@ -12,7 +12,6 @@ from django.template import Variable
 from django.utils import timezone
 
 from common.djangoapps.student.models import CourseEnrollment
-from lms.djangoapps.grades.models import PersistentCourseGrade
 
 import pytz
 
@@ -35,7 +34,7 @@ class Command(ExportCommand):
         filename = f"enrollment_export{now:%Y%m%d_%H%M%S}_{'_'.join(self.course_ids)}.csv"
         filepath = os.path.join(options["output_dir"], filename)
 
-        
+
         self.logger.info("Exporting courses: %s", ", ".join(self.course_ids))
         self.enrollments = CourseEnrollment.objects.filter(course__in=self.course_ids)
 
@@ -49,12 +48,6 @@ class Command(ExportCommand):
             self.enrollments = self.enrollments.filter(
                 user__email__endswith=email_domain
             )
-
-        self.stdout.write("Fetching grades...")
-        self.grades = {
-            (grade.user_id, grade.course_id): grade
-            for grade in PersistentCourseGrade.objects.all()
-        }
 
         with open(filepath, "w", encoding="utf8") as csv_file:
             self.export_enrollment_data(csv_file)
@@ -73,9 +66,8 @@ class Command(ExportCommand):
             "Login ID": "user.email",
             "Course Name": "course.display_name",
             "Enrollment Created Date": "created",
-            "Enrollment Started Date": "",
+            "Enrollment Started Date": "created",
             "Enrollment Completed Date": "",
-            "Enrollment Score": "",
             "Enrollment Status": "",
             "Enrollment Access Expires Date": "course.end",
         }
@@ -103,19 +95,14 @@ class Command(ExportCommand):
                 )
 
             row["Enrollment Status"] = "not started"
-            grade = self.grades.get((enrollment.user_id, enrollment.course_id))
             modules = enrollment.user.studentmodule_set.filter(
                 course_id=enrollment.course_id
-            ).order_by("created")
-            first_block_viewed_at = modules.values_list("created", flat=True).first()
+            ).order_by("-created")
+            last_block_viewed_at = modules.values_list("created", flat=True).first()
 
-            if first_block_viewed_at:
+            if last_block_viewed_at:
                 row["Enrollment Status"] = "completed"
-                row["Enrollment Started Date"] = first_block_viewed_at
+                row["Enrollment Completed Date"] = last_block_viewed_at
 
-            if grade and grade.passed_timestamp:
-                row["Enrollment Score"] = grade.percent_grade
-                row["Enrollment Completed Date"] = grade.passed_timestamp
-                row["Enrollment Status"] = "completed"
             writer.writerow(row)
         self.stdout.write("Done!")
