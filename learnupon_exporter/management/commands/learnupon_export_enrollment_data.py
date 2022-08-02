@@ -4,6 +4,7 @@ Export the list of users to a CSV file
 from __future__ import absolute_import, print_function, unicode_literals
 
 import csv
+import datetime
 import os
 
 from django.contrib.auth import get_user_model
@@ -11,9 +12,8 @@ from django.template import Variable
 from django.utils import timezone
 
 from common.djangoapps.student.models import CourseEnrollment
-from lms.djangoapps.grades.models import PersistentCourseGrade
-from edxlearndot.learndot import LearndotAPIClient
-from edxlearndot.models import CourseMapping, EnrolmentStatusLog
+
+import pytz
 
 from . import ExportCommand
 
@@ -22,81 +22,41 @@ class Command(ExportCommand):
     """
     export_enrollment_data management command.
     """
+
     def handle(self, *args, **options):
         """
         Create the export
         """
-        self.set_logging(options['verbosity'])
+        self.set_logging(options["verbosity"])
+        self.course_ids = options["course_ids"]
 
         now = timezone.now()
-        filename = f"enrollment_export{now:%Y%m%d_%H%M%S}.csv"
-        filepath = os.path.join(options['output_dir'], filename)
+        filename = f"enrollment_export{now:%Y%m%d_%H%M%S}_{'_'.join(self.course_ids)}.csv"
+        filepath = os.path.join(options["output_dir"], filename)
 
-        self.course_ids = options['course_ids']
-        self.logger.info("Exporting courses: %s", ', '.join(self.course_ids))
+
+        self.logger.info("Exporting courses: %s", ", ".join(self.course_ids))
         self.enrollments = CourseEnrollment.objects.filter(course__in=self.course_ids)
 
-        with open(filepath, 'w', encoding='utf8') as csv_file:
+        start_date = options.get("start_date")
+
+        if start_date:
+            self.enrollments = self.enrollments.filter(created__gte=start_date)
+
+        email_domain = options.get("email_domain")
+        if email_domain:
+            self.enrollments = self.enrollments.filter(
+                user__email__endswith=email_domain
+            )
+
+        with open(filepath, "w", encoding="utf8") as csv_file:
             self.export_enrollment_data(csv_file)
 
         s3_bucket = self.get_s3_bucket()
 
         if s3_bucket is not None:
-            with open(filepath, 'rb') as csv_file:
+            with open(filepath, "rb") as csv_file:
                 self.upload_file_to_s3(s3_bucket, csv_file, filename)
-
-    def get_enrollment_ids_for_user(self, user, course_mappings):
-        """
-        Fetch the learndot enrollment ids for the provided user.
-
-        Returns:
-        - Dictionary with
-           - key=learndot enrollment id
-           - value=the relevant CourseEnrollment instance
-        """
-        self.logger.debug("Fetching enrollment ids for user: %s", user)
-        enrollments = self.enrollments.filter(user=user).select_related('user')
-        learndot_client = LearndotAPIClient()
-        enrollment_ids = {}
-        contact_id = learndot_client.get_contact_id(user)
-
-        for enrollment in enrollments:
-            course_key = str(enrollment.course_id)
-            if course_key in course_mappings and contact_id:
-                course_mapping = course_mappings[course_key]
-                enrollment_id = learndot_client.get_enrolment_id(contact_id, course_mapping.learndot_component_id)
-                enrollment_ids[enrollment] = enrollment_id
-            else:
-                enrollment_ids[enrollment] = None
-
-        self.logger.info("Fetched enrollment ids for user: %s", user)
-        return enrollment_ids
-
-    def fetch_learndot_enrollments(self):
-        """
-        Fetch learndot enrollment ids for all users in the system.
-
-        Returns:
-        - Dictionary with
-           - key=learndot enrollment id
-           - value=the relevant CourseEnrollment instance
-        """
-
-        course_mappings = {str(m.edx_course_key): m for m in CourseMapping.objects.all()}
-
-        user_ids = self.enrollments.filter(course__in=self.course_ids).values('user_id')
-        users = get_user_model().objects.filter(pk__in=user_ids)
-
-        user_count = users.count()
-        ten_percent = int(user_count / 10)
-
-        self.logger.info("Fetching learndot enrollments for %s users", user_count)
-        
-        for index, user in enumerate(users):
-            if index % ten_percent == 0:
-                self.logger.info('Fetching %s of %s', index + 1, user_count)
-            user_enrollment_ids = self.get_enrollment_ids_for_user(user, course_mappings)
-            yield from user_enrollment_ids.items()
 
     def export_enrollment_data(self, csv_file):
         """
@@ -104,35 +64,45 @@ class Command(ExportCommand):
         """
         field_mapping = {
             "Login ID": "user.email",
-            "Course Name": "course_id",
-            "Enrollment Status": "",
+            "Course Name": "course.display_name",
+            "Enrollment Created Date": "created",
+            "Enrollment Started Date": "created",
             "Enrollment Completed Date": "",
-            "Enrollment Created Date": "",
-            "Enrollment Started Date": "",
-            "Enrollment Score": "",
-            "Enrollment Access Expires Date": ""
+            "Enrollment Status": "",
+            "Enrollment Access Expires Date": "course.end",
         }
 
         writer = csv.DictWriter(csv_file, fieldnames=field_mapping)
 
         writer.writeheader()
-        enrollment_statuses = {es.learndot_enrolment_id: es for es in EnrolmentStatusLog.objects.all()}
+        enrollments = self.enrollments
 
-        for enrollment, enrollment_id in self.fetch_learndot_enrollments():
+        record_count = self.enrollments.count()
+        self.stdout.write(f"Writing {record_count} enrollments")
+        batch_size = int(record_count / 10) or 1
+
+        for record_index, enrollment in enumerate(enrollments):
+            if record_index > 0 and record_index % batch_size == 0:
+                self.stdout.write(f"Completed: {record_index + 1} of {record_count}")
+
             pseudo_context = {"obj": enrollment}
             row = {}
             for csv_field, instance_field in field_mapping.items():
                 if not instance_field:
-                    row[csv_field] = ""
-                else:
-                    row[csv_field] = Variable(f"obj.{instance_field}").resolve(pseudo_context)
+                    continue
+                row[csv_field] = Variable(f"obj.{instance_field}").resolve(
+                    pseudo_context
+                )
 
-            row['Enrollment Status'] = 'not started'
-            enrollment_status = enrollment_statuses.get(enrollment_id)
-            if enrollment_status:
-                grade = enrollment_status.status.lower()
-                if grade == 'passed':
-                    row['Enrollment Status'] = 'passed'
-                    row['Enrollment Completed Date'] = self.format_date(enrollment_status.updated_at)
+            row["Enrollment Status"] = "not started"
+            modules = enrollment.user.studentmodule_set.filter(
+                course_id=enrollment.course_id
+            ).order_by("-created")
+            last_block_viewed_at = modules.values_list("created", flat=True).first()
+
+            if last_block_viewed_at:
+                row["Enrollment Status"] = "completed"
+                row["Enrollment Completed Date"] = last_block_viewed_at
 
             writer.writerow(row)
+        self.stdout.write("Done!")
