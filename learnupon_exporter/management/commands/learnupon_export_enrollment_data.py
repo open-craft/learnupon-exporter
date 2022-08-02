@@ -66,7 +66,7 @@ class Command(ExportCommand):
             "Login ID": "user.email",
             "Course Name": "course.display_name",
             "Enrollment Created Date": "created",
-            "Enrollment Started Date": "",
+            "Enrollment Started Date": "created",
             "Enrollment Completed Date": "",
             "Enrollment Status": "",
             "Enrollment Access Expires Date": "course.end",
@@ -95,15 +95,14 @@ class Command(ExportCommand):
                 )
 
             row["Enrollment Status"] = "not started"
-            row["Enrollment Started Date"] = enrollment.created
             modules = enrollment.user.studentmodule_set.filter(
                 course_id=enrollment.course_id
-            ).order_by("created")
-            first_block_viewed_at = modules.values_list("created", flat=True).first()
+            ).order_by("-created")
+            last_block_viewed_at = modules.values_list("created", flat=True).first()
 
-            if first_block_viewed_at:
+            if last_block_viewed_at:
                 row["Enrollment Status"] = "completed"
-                row["Enrollment Completed Date"] = first_block_viewed_at
+                row["Enrollment Completed Date"] = last_block_viewed_at
 
             writer.writerow(row)
         self.stdout.write("Done!")
