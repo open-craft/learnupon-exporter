@@ -12,10 +12,12 @@ from django.template import Variable
 from django.utils import timezone
 
 from common.djangoapps.student.models import CourseEnrollment
+from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 
 import pytz
 
 from . import ExportCommand
+from concurrent import futures
 
 
 class Command(ExportCommand):
@@ -27,38 +29,56 @@ class Command(ExportCommand):
         """
         Create the export
         """
-        self.set_logging(options["verbosity"])
-        self.course_ids = options["course_ids"]
+        self.timestamp = timezone.now()
+        self.output_dir = options["output_dir"]
 
-        now = timezone.now()
-        filename = f"enrollment_export{now:%Y%m%d_%H%M%S}_{'_'.join(self.course_ids)}.csv"
-        filepath = os.path.join(options["output_dir"], filename)
+        course_ids = options["course_ids"]
+        if not course_ids:
+            course_ids = CourseOverview.objects.values_list("id", flat=True).order_by("id")
+            self.stdout.write(f"Exporting ALL {course_ids.count()} courses")
+        else:
+            self.stdout.write("Exporting courses: %s" % ", ".join(course_ids))
 
+        self.course_indexes = {course_id: index for index, course_id in enumerate(course_ids, 1)}
 
-        self.logger.info("Exporting courses: %s", ", ".join(self.course_ids))
-        self.enrollments = CourseEnrollment.objects.filter(course__in=self.course_ids)
+        self.email_domain = options.get("email_domain")
+        self.start_date = options.get("start_date")
 
-        start_date = options.get("start_date")
+        with futures.ThreadPoolExecutor() as executor:
+            for result in executor.map(self.export_course_to_csv, course_ids):
+                continue
 
-        if start_date:
-            self.enrollments = self.enrollments.filter(created__gte=start_date)
+    def export_course_to_csv(self, course_id):
+        timestamp = self.timestamp.strftime("%Y%m%d_%H%M%S")
+        filename = f"enrollment_export{timestamp}_{course_id}.csv"
+        filepath = os.path.join(self.output_dir, filename)
+        course_index = self.course_indexes[course_id]
+        self.stdout.write(f"{course_id} - starting export #{course_index}")
 
-        email_domain = options.get("email_domain")
-        if email_domain:
-            self.enrollments = self.enrollments.filter(
-                user__email__endswith=email_domain
-            )
-
+        enrollments = self.get_enrollments_for_course(course_id)
         with open(filepath, "w", encoding="utf8") as csv_file:
-            self.export_enrollment_data(csv_file)
+            self.export_enrollments_to_csv(csv_file, enrollments, f"{course_id} - ")
 
         s3_bucket = self.get_s3_bucket()
 
         if s3_bucket is not None:
+            self.stdout.write(f"{course_id} - uploading to s3")
             with open(filepath, "rb") as csv_file:
                 self.upload_file_to_s3(s3_bucket, csv_file, filename)
 
-    def export_enrollment_data(self, csv_file):
+        self.stdout.write(f"{course_id} - completed")
+
+    def get_enrollments_for_course(self, course_id):
+        enrollments = CourseEnrollment.objects.filter(course_id=course_id)
+
+        if self.email_domain:
+            enrollments = enrollments.filter(user__email__endswith=self.email_domain)
+
+        if self.start_date:
+            enrollments = enrollments.filter(created__gte=self.start_date)
+        return enrollments
+
+    def export_enrollments_to_csv(self, csv_file, enrollments, progress_prefix=""):
         """
         Export all enrollment data in the system
         """
@@ -75,15 +95,15 @@ class Command(ExportCommand):
         writer = csv.DictWriter(csv_file, fieldnames=field_mapping)
 
         writer.writeheader()
-        enrollments = self.enrollments
-
-        record_count = self.enrollments.count()
-        self.stdout.write(f"Writing {record_count} enrollments")
+        record_count = enrollments.count()
+        self.stdout.write(f"{progress_prefix}Writing {record_count} enrollments")
         batch_size = int(record_count / 10) or 1
 
         for record_index, enrollment in enumerate(enrollments):
             if record_index > 0 and record_index % batch_size == 0:
-                self.stdout.write(f"Completed: {record_index + 1} of {record_count}")
+                self.stdout.write(
+                    f"{progress_prefix}Completed: {record_index + 1} of {record_count}"
+                )
 
             pseudo_context = {"obj": enrollment}
             row = {}
@@ -105,4 +125,3 @@ class Command(ExportCommand):
                 row["Enrollment Completed Date"] = last_block_viewed_at
 
             writer.writerow(row)
-        self.stdout.write("Done!")

@@ -41,7 +41,7 @@ class ExportCommand(BaseCommand):  # pylint: disable=abstract-method
         )
 
         self.args["course_ids"] = parser.add_argument(
-            "course_ids", type=str, help="List of Course Ids to export.", nargs="+"
+            "course_ids", type=str, help="List of Course Ids to export.", nargs="*"
         )
 
         self.options["start_date"] = parser.add_argument(
