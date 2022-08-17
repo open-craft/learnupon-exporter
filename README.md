@@ -27,8 +27,8 @@ In both cases an export file will be created in `output` named based on the curr
 ## SETTINGS
 
 - `LEARNUPON_EXPORTER_STATIC_FILES_BUCKET = ''` # S3 Bucket to put files into. If empty no S3 upload is attempted.
-`- LEARNUPON_EXPORTER_STATIC_FILES_PATH = 'learnupon_exports/'` # Folder/Prefix to use within the S3 bucket for the output file.
-`- LEARNUPON_EXPORTER_AWS_ACCESS_KEY_ID = ''` # AWS Access Key
-`- LEARNUPON_EXPORTER_AWS_ACCESS_KEY_SECRET = ''` # AWS Secret Key
+- `LEARNUPON_EXPORTER_STATIC_FILES_PATH = 'learnupon_exports/'` # Folder/Prefix to use within the S3 bucket for the output file.
+- `LEARNUPON_EXPORTER_AWS_ACCESS_KEY_ID = ''` # AWS Access Key
+- `LEARNUPON_EXPORTER_AWS_ACCESS_KEY_SECRET = ''` # AWS Secret Key
 
 
